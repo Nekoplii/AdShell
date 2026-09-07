@@ -89,31 +89,32 @@ class _MainScreenState extends State<MainScreen> {
     final isSelected = _selectedIndex == index;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16), // Hover splash shape matches 1:1 square
-        onTap: () {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
-        // Hover/Tap effect is constrained to this 48x48 box
-        child: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: isSelected 
-                ? AppColors.primary.withOpacity(isDark ? 0.2 : 0.15) 
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Icon(
-            icon,
-            color: isSelected 
-                ? AppColors.primary 
-                : (isDark ? AppColors.neutral400 : AppColors.neutral500),
-            size: 26,
+    return Center( // Wraps InkWell to ensure perfect vertical centering within the 72 height
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            setState(() {
+              _selectedIndex = index;
+            });
+          },
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: isSelected 
+                  ? AppColors.primary.withOpacity(isDark ? 0.2 : 0.15) 
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(
+              icon,
+              color: isSelected 
+                  ? AppColors.primary 
+                  : (isDark ? AppColors.neutral400 : AppColors.neutral500),
+              size: 26,
+            ),
           ),
         ),
       ),
@@ -131,18 +132,17 @@ class _MainScreenState extends State<MainScreen> {
       ),
       body: _pages[_selectedIndex],
       bottomNavigationBar: Container(
-        height: 72,
-        color: navBackgroundColor, // Header & Tab identical, differs from root
-        child: SafeArea(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildNavItem(context, icon: _selectedIndex == 0 ? Icons.terminal : Icons.terminal_outlined, index: 0),
-              _buildNavItem(context, icon: _selectedIndex == 1 ? Icons.bookmark : Icons.bookmark_border, index: 1),
-              _buildNavItem(context, icon: _selectedIndex == 2 ? Icons.grid_view_rounded : Icons.grid_view, index: 2),
-              _buildNavItem(context, icon: _selectedIndex == 3 ? Icons.info : Icons.info_outline, index: 3),
-            ],
-          ),
+        height: 72 + MediaQuery.of(context).padding.bottom, // Account for system navigation bar height
+        color: navBackgroundColor,
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom), // Push content up
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildNavItem(context, icon: _selectedIndex == 0 ? Icons.terminal : Icons.terminal_outlined, index: 0),
+            _buildNavItem(context, icon: _selectedIndex == 1 ? Icons.bookmark : Icons.bookmark_border, index: 1),
+            _buildNavItem(context, icon: _selectedIndex == 2 ? Icons.grid_view_rounded : Icons.grid_view, index: 2),
+            _buildNavItem(context, icon: _selectedIndex == 3 ? Icons.info : Icons.info_outline, index: 3),
+          ],
         ),
       ),
     );
