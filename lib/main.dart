@@ -5,6 +5,7 @@ void main() {
 }
 
 class AppColors {
+  static const Color primary = Color(0xFF8B5CF6); // Violet/Purple
   static const Color neutral50 = Color(0xFFF1F2F3);
   static const Color neutral100 = Color(0xFFD6D8DA);
   static const Color neutral200 = Color(0xFFADB1B8);
@@ -27,39 +28,37 @@ class MyApp extends StatelessWidget {
       title: 'AdShell',
       theme: ThemeData(
         useMaterial3: true,
-        scaffoldBackgroundColor: AppColors.neutral50,
+        scaffoldBackgroundColor: AppColors.neutral100, // Different from header/tab
         colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.neutral500,
+          seedColor: AppColors.primary,
+          primary: AppColors.primary,
           brightness: Brightness.light,
         ).copyWith(
           surface: AppColors.neutral50,
           onSurface: AppColors.neutral900,
         ),
-        navigationBarTheme: const NavigationBarThemeData(
-          backgroundColor: AppColors.neutral100,
-          indicatorColor: AppColors.neutral200,
-        ),
         appBarTheme: const AppBarTheme(
-          backgroundColor: AppColors.neutral100,
+          backgroundColor: AppColors.neutral50, // Different from root
+          elevation: 0,
+          centerTitle: true,
           foregroundColor: AppColors.neutral900,
         ),
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
-        scaffoldBackgroundColor: AppColors.neutral950,
+        scaffoldBackgroundColor: AppColors.neutral950, // Root background
         colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.neutral500,
+          seedColor: AppColors.primary,
+          primary: AppColors.primary,
           brightness: Brightness.dark,
         ).copyWith(
           surface: AppColors.neutral900,
           onSurface: AppColors.neutral50,
         ),
-        navigationBarTheme: const NavigationBarThemeData(
-          backgroundColor: AppColors.neutral900,
-          indicatorColor: AppColors.neutral700,
-        ),
         appBarTheme: const AppBarTheme(
-          backgroundColor: AppColors.neutral900,
+          backgroundColor: AppColors.neutral900, // Different from root
+          elevation: 0,
+          centerTitle: true,
           foregroundColor: AppColors.neutral50,
         ),
       ),
@@ -86,38 +85,65 @@ class _MainScreenState extends State<MainScreen> {
     const Center(child: Text('Device Info')),
   ];
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('AdShell'),
-      ),
-      body: _pages[_selectedIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (int index) {
+  Widget _buildNavItem(BuildContext context, {required IconData icon, required int index}) {
+    final isSelected = _selectedIndex == index;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16), // Hover splash shape matches 1:1 square
+        onTap: () {
           setState(() {
             _selectedIndex = index;
           });
         },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.terminal),
-            label: 'Shell',
+        // Hover/Tap effect is constrained to this 48x48 box
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: isSelected 
+                ? AppColors.primary.withOpacity(isDark ? 0.2 : 0.15) 
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.bookmark),
-            label: 'Saved',
+          child: Icon(
+            icon,
+            color: isSelected 
+                ? AppColors.primary 
+                : (isDark ? AppColors.neutral400 : AppColors.neutral500),
+            size: 26,
           ),
-          NavigationDestination(
-            icon: Icon(Icons.apps),
-            label: 'Apps',
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final navBackgroundColor = isDark ? AppColors.neutral900 : AppColors.neutral50;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('AdShell', style: TextStyle(fontWeight: FontWeight.bold)),
+      ),
+      body: _pages[_selectedIndex],
+      bottomNavigationBar: Container(
+        height: 72,
+        color: navBackgroundColor, // Header & Tab identical, differs from root
+        child: SafeArea(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildNavItem(context, icon: _selectedIndex == 0 ? Icons.terminal : Icons.terminal_outlined, index: 0),
+              _buildNavItem(context, icon: _selectedIndex == 1 ? Icons.bookmark : Icons.bookmark_border, index: 1),
+              _buildNavItem(context, icon: _selectedIndex == 2 ? Icons.grid_view_rounded : Icons.grid_view, index: 2),
+              _buildNavItem(context, icon: _selectedIndex == 3 ? Icons.info : Icons.info_outline, index: 3),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.info),
-            label: 'Info',
-          ),
-        ],
+        ),
       ),
     );
   }
