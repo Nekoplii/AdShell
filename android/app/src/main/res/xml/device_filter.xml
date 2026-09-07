@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- ADB interface class is 255 (vendor specific), subclass 66, protocol 1 -->
-    <usb-device class="255" subclass="66" protocol="1" />
+    <!-- Match any USB device -->
+    <usb-device />
 </resources>
