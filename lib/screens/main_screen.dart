@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../core/usb_manager.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -10,9 +11,60 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
+  List<UsbDeviceInfo> _devices = [];
 
-  final List<Widget> _pages = [
-    const Center(child: Text('Shell/Terminal')),
+  @override
+  void initState() {
+    super.initState();
+    _loadDevices();
+  }
+
+  Future<void> _loadDevices() async {
+    final devices = await UsbManager.getDevices();
+    setState(() {
+      _devices = devices;
+    });
+  }
+
+  Widget _buildShellTab() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        ElevatedButton(
+          onPressed: _loadDevices,
+          child: const Text('Scan USB Devices'),
+        ),
+        const SizedBox(height: 16),
+        Expanded(
+          child: ListView.builder(
+            itemCount: _devices.length,
+            itemBuilder: (context, index) {
+              final device = _devices[index];
+              return ListTile(
+                leading: const Icon(Icons.usb),
+                title: Text(device.productName ?? 'Unknown Device'),
+                subtitle: Text(device.manufacturerName ?? 'Unknown Manufacturer'),
+                trailing: IconButton(
+                  icon: const Icon(Icons.link),
+                  onPressed: () async {
+                    final granted = await UsbManager.requestPermission(device.deviceName);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(granted ? 'Permission Granted' : 'Permission Denied')),
+                      );
+                    }
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  late final List<Widget> _pages = [
+    _buildShellTab(),
     const Center(child: Text('Saved Commands')),
     const Center(child: Text('App Manager')),
     const Center(child: Text('Device Info')),
