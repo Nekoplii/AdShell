@@ -35,7 +35,14 @@ class FastbootClient {
     _shellOutput.add('\r\n\$ fastboot $command\r\n');
 
     try {
-      final payload = Uint8List.fromList(utf8.encode(command));
+      final usbCommand = _translateCommand(command);
+      
+      if (usbCommand.startsWith('ERROR:')) {
+        _shellOutput.add('${usbCommand.substring(6)}\r\n');
+        return;
+      }
+
+      final payload = Uint8List.fromList(utf8.encode(usbCommand));
       await UsbManager.write(payload);
 
       // Fastboot response loop
@@ -70,5 +77,43 @@ class FastbootClient {
     } catch (e) {
       _shellOutput.add('Error executing command: $e\r\n');
     }
+  }
+
+  /// Translates standard fastboot CLI commands into raw USB protocol commands
+  String _translateCommand(String cliCommand) {
+    final parts = cliCommand.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty) return cliCommand;
+
+    final cmd = parts[0].toLowerCase();
+
+    // Commands that require pushing a local file over USB
+    if (cmd == 'flash' || cmd == 'boot' || cmd == 'update') {
+      return 'ERROR: Binary transfer commands (flash, boot, update) are not supported in the text terminal. They require selecting a file.';
+    }
+
+    // Special reboot aliases
+    if (cmd == 'reboot') {
+      if (parts.length > 1) {
+        if (parts[1] == 'bootloader') return 'reboot-bootloader';
+        if (parts[1] == 'recovery') return 'reboot-recovery';
+        if (parts[1] == 'fastboot') return 'reboot-fastboot';
+      }
+      return 'reboot';
+    }
+
+    // OEM and Flashing commands keep their spaces natively
+    if (cmd == 'oem' || cmd == 'flashing') {
+      return cliCommand;
+    }
+
+    // Default fastboot protocol behavior: replace the first space with a colon.
+    // Example: "getvar all" -> "getvar:all"
+    // Example: "set_active b" -> "set_active:b"
+    // Example: "erase userdata" -> "erase:userdata"
+    if (parts.length > 1) {
+      return cliCommand.replaceFirst(RegExp(r'\s+'), ':');
+    }
+
+    return cliCommand;
   }
 }
