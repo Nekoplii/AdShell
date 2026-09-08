@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../core/adb_client.dart';
+import '../core/fastboot_client.dart';
 import '../core/usb_manager.dart';
-import '../core/terminal_processor.dart';
 import '../theme/app_theme.dart';
 
 class MainScreen extends StatefulWidget {
@@ -17,33 +17,88 @@ class _MainScreenState extends State<MainScreen> {
   List<UsbDeviceInfo> _devices = [];
   UsbDeviceInfo? _selectedDevice;
   final AdbClient _adbClient = AdbClient();
+  final FastbootClient _fastbootClient = FastbootClient();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _commandController = TextEditingController();
-  final TerminalProcessor _terminal = TerminalProcessor();
+  final FocusNode _inputFocusNode = FocusNode();
+  
   bool _isShellReady = false;
-
-  // Command History
+  int _activeProtocol = 0; // 0=None, 1=ADB, 3=Fastboot
+  final List<String> _terminalLines = [];
   final List<String> _commandHistory = [];
   int _historyIndex = -1;
-
-  // Termux-style Modifiers
-  bool _isCtrlActive = false;
-  bool _isAltActive = false;
 
   @override
   void initState() {
     super.initState();
+
     _adbClient.shellOutput.listen((data) {
       if (mounted) {
         setState(() {
-          if (data.contains('Interactive shell ready')) {
-            _isShellReady = true;
-          } else if (data.contains('Disconnected') || data.contains('closed by remote')) {
-            _isShellReady = false;
+          final cleanData = data.replaceAll('\r', '');
+          final parts = cleanData.split('\n');
+          if (_terminalLines.isEmpty) {
+            _terminalLines.addAll(parts);
+          } else {
+            _terminalLines[_terminalLines.length - 1] += parts.first;
+            if (parts.length > 1) {
+              _terminalLines.addAll(parts.sublist(1));
+            }
           }
-          _terminal.processOutput(data);
+          if (_terminalLines.length > 1000) {
+            _terminalLines.removeRange(0, _terminalLines.length - 1000);
+          }
         });
         _scrollToBottom();
+      }
+    });
+
+    _adbClient.shellState.listen((isReady) {
+      if (mounted) {
+        setState(() {
+          _isShellReady = isReady;
+          if (!isReady) _activeProtocol = 0;
+        });
+        if (isReady) {
+          Future.delayed(const Duration(milliseconds: 100), () {
+            if (mounted) _inputFocusNode.requestFocus();
+          });
+        }
+      }
+    });
+
+    _fastbootClient.shellOutput.listen((data) {
+      if (mounted) {
+        setState(() {
+          final cleanData = data.replaceAll('\r', '');
+          final parts = cleanData.split('\n');
+          if (_terminalLines.isEmpty) {
+            _terminalLines.addAll(parts);
+          } else {
+            _terminalLines[_terminalLines.length - 1] += parts.first;
+            if (parts.length > 1) {
+              _terminalLines.addAll(parts.sublist(1));
+            }
+          }
+          if (_terminalLines.length > 1000) {
+            _terminalLines.removeRange(0, _terminalLines.length - 1000);
+          }
+        });
+        _scrollToBottom();
+      }
+    });
+
+    _fastbootClient.shellState.listen((isReady) {
+      if (mounted) {
+        setState(() {
+          _isShellReady = isReady;
+          if (!isReady) _activeProtocol = 0;
+        });
+        if (isReady) {
+          Future.delayed(const Duration(milliseconds: 100), () {
+            if (mounted) _inputFocusNode.requestFocus();
+          });
+        }
       }
     });
 
@@ -56,6 +111,7 @@ class _MainScreenState extends State<MainScreen> {
   void dispose() {
     _commandController.dispose();
     _scrollController.dispose();
+    _inputFocusNode.dispose();
     super.dispose();
   }
 
@@ -72,53 +128,75 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _loadDevices() async {
-    _terminal.processOutput('Scanning for USB devices...\n');
-    setState(() {});
+    setState(() {
+      _terminalLines.add('Scanning for USB devices...');
+    });
     _scrollToBottom();
 
     try {
       final devices = await UsbManager.getDevices();
       if (!mounted) return;
-      _devices = devices;
-      _selectedDevice = null;
-      if (devices.isEmpty) {
-        _terminal.processOutput('No USB devices found.\n');
-        _terminal.processOutput('Make sure OTG is enabled and cable is connected.\n');
-      } else {
-        _terminal.processOutput('Found ${devices.length} USB device(s):\n');
-        for (var d in devices) {
-          _terminal.processOutput('  - ${d.productName ?? "Unknown"} (VID:${d.vendorId} PID:${d.productId})\n');
+      setState(() {
+        _devices = devices;
+        _selectedDevice = null;
+        if (devices.isEmpty) {
+          _terminalLines.add('No USB devices found.');
+          _terminalLines.add('Make sure OTG is enabled and cable is connected.');
+        } else {
+          _terminalLines.add('Found ${devices.length} USB device(s):');
+          for (var d in devices) {
+            _terminalLines.add('  - ${d.productName ?? "Unknown"} (VID:${d.vendorId} PID:${d.productId})');
+          }
         }
-      }
-      setState(() {});
+      });
     } catch (e) {
       if (!mounted) return;
-      _terminal.processOutput('Error scanning: $e\n');
-      setState(() {});
+      setState(() {
+        _terminalLines.add('Error scanning: $e');
+      });
     }
     _scrollToBottom();
   }
 
   Future<void> _connectDevice(UsbDeviceInfo device) async {
-    _terminal.processOutput('\n--- Connecting to ${device.productName ?? "Unknown"} ---\n');
-    _terminal.processOutput('Requesting USB permission...\n');
-    setState(() {});
+    setState(() {
+      _terminalLines.add('');
+      _terminalLines.add('--- Connecting to ${device.productName ?? "Unknown"} ---');
+      _terminalLines.add('Requesting USB permission...');
+    });
     _scrollToBottom();
 
     try {
       final granted = await UsbManager.requestPermission(device.deviceName);
       if (!mounted) return;
 
-      _terminal.processOutput(granted ? 'Permission GRANTED.\n' : 'Permission DENIED.\n');
-      setState(() {});
+      setState(() {
+        _terminalLines.add(granted ? 'Permission GRANTED.' : 'Permission DENIED.');
+      });
 
       if (granted) {
-        await _adbClient.connect(device.deviceName);
+        final protocol = await UsbManager.connect(device.deviceName);
+        setState(() {
+          _activeProtocol = protocol;
+        });
+
+        if (protocol == 1) {
+          _terminalLines.add('Device is in ADB Mode.');
+          await _adbClient.connect(device.deviceName);
+        } else if (protocol == 3) {
+          _terminalLines.add('Device is in Fastboot Mode.');
+          _fastbootClient.connect();
+        } else {
+          setState(() {
+            _terminalLines.add('Failed to establish ADB or Fastboot connection.');
+          });
+        }
       }
     } catch (e) {
       if (!mounted) return;
-      _terminal.processOutput('Connection error: $e\n');
-      setState(() {});
+      setState(() {
+        _terminalLines.add('Connection error: $e');
+      });
     }
     _scrollToBottom();
   }
@@ -129,66 +207,84 @@ class _MainScreenState extends State<MainScreen> {
       _commandHistory.add(cmd);
       _historyIndex = _commandHistory.length;
 
-      if (cmd == 'fastboot' || cmd.startsWith('fastboot ')) {
-        _terminal.processOutput('\n[AdShell] Fastboot protocol over USB is not yet implemented.\n');
-        _terminal.processOutput('[AdShell] Target must be in bootloader mode. Coming soon!\n');
-        setState(() {});
-        _commandController.clear();
-        _scrollToBottom();
-        return;
-      }
-
-      if (cmd == 'adb' || cmd == 'adb help') {
-        _terminal.processOutput('\n[AdShell] You are already inside an ADB shell session.\n');
-        _terminal.processOutput('[AdShell] Type commands directly (e.g. ls, pm list packages, reboot).\n');
-        _terminal.processOutput('[AdShell] Use "adb shell <cmd>" prefix if you prefer.\n');
-        setState(() {});
-        _commandController.clear();
-        _scrollToBottom();
-        return;
-      }
-
-      if (cmd.startsWith('adb shell ')) {
-        cmd = cmd.substring(10);
-      } else if (cmd.startsWith('adb ')) {
-        cmd = cmd.substring(4);
-      }
-
       if (cmd == 'clear') {
-        _terminal.clear();
-        setState(() {});
+        setState(() {
+          _terminalLines.clear();
+          _terminalLines.add('');
+        });
         _commandController.clear();
         _scrollToBottom();
         return;
       }
 
-      _adbClient.writeShellCommand(cmd);
-      _commandController.clear();
-    }
-  }
-
-  void _onTextChanged(String text) {
-    if (text.isEmpty) return;
-
-    if (_isCtrlActive || _isAltActive) {
-      final char = text.substring(text.length - 1);
-      
-      _commandController.text = text.substring(0, text.length - 1);
-      if (_commandController.text.isNotEmpty) {
-        _commandController.selection = TextSelection.collapsed(offset: _commandController.text.length);
-      }
-
-      if (_isCtrlActive) {
-        final code = char.toLowerCase().codeUnitAt(0);
-        if (code >= 97 && code <= 122) { // a-z
-          final ctrlChar = String.fromCharCode(code - 96);
-          _adbClient.writeShellCommand(ctrlChar, addNewline: false);
+      if (_activeProtocol == 3) {
+        // Fastboot mode
+        if (cmd.startsWith('fastboot ')) {
+          cmd = cmd.substring(9);
+        } else if (cmd == 'fastboot') {
+          setState(() {
+            _terminalLines.addAll([
+              '',
+              '[AdShell] You are connected in Fastboot mode.',
+              '[AdShell] Type commands directly (e.g. getvar all, reboot).',
+              ''
+            ]);
+          });
+          _commandController.clear();
+          _scrollToBottom();
+          return;
+        } else if (cmd.startsWith('adb')) {
+          setState(() {
+            _terminalLines.add('[AdShell] Error: Cannot run ADB commands while in Fastboot mode.');
+          });
+          _commandController.clear();
+          _scrollToBottom();
+          return;
         }
-        setState(() => _isCtrlActive = false);
-      } else if (_isAltActive) {
-        _adbClient.writeShellCommand('\x1B$char', addNewline: false);
-        setState(() => _isAltActive = false);
+
+        _fastbootClient.executeCommand(cmd);
+
+      } else if (_activeProtocol == 1) {
+        // ADB mode
+        if (cmd == 'fastboot' || cmd.startsWith('fastboot ')) {
+          setState(() {
+            _terminalLines.addAll([
+              '',
+              '[AdShell] Device is currently in ADB mode.',
+              '[AdShell] Reboot to bootloader to use Fastboot commands.',
+              ''
+            ]);
+          });
+          _commandController.clear();
+          _scrollToBottom();
+          return;
+        }
+
+        if (cmd == 'adb' || cmd == 'adb help') {
+          setState(() {
+            _terminalLines.addAll([
+              '',
+              '[AdShell] Commands are executed directly on the target device.',
+              '[AdShell] Type commands directly (e.g. ls, pm list packages, reboot).',
+              ''
+            ]);
+          });
+          _commandController.clear();
+          _scrollToBottom();
+          return;
+        }
+
+        if (cmd.startsWith('adb shell ')) {
+          cmd = cmd.substring(10);
+        } else if (cmd.startsWith('adb ')) {
+          cmd = cmd.substring(4);
+        }
+
+        _adbClient.executeCommand(cmd);
       }
+
+      _commandController.clear();
+      _inputFocusNode.requestFocus();
     }
   }
 
@@ -213,58 +309,6 @@ class _MainScreenState extends State<MainScreen> {
         _commandController.text = '';
       });
     }
-  }
-
-  void _moveCursor(int offset) {
-    final currentOffset = _commandController.selection.baseOffset;
-    if (currentOffset == -1) return;
-    final newOffset = (currentOffset + offset).clamp(0, _commandController.text.length);
-    _commandController.selection = TextSelection.collapsed(offset: newOffset);
-  }
-
-  void _insertChar(String char) {
-    final text = _commandController.text;
-    final selection = _commandController.selection;
-    if (selection.baseOffset == -1) {
-      _commandController.text = text + char;
-    } else {
-      final newText = text.replaceRange(selection.start, selection.end, char);
-      _commandController.text = newText;
-      _commandController.selection = TextSelection.collapsed(offset: selection.start + 1);
-    }
-  }
-
-  Widget _buildExtraKey(String label, VoidCallback onTap, {bool isActive = false}) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Padding(
-      padding: const EdgeInsets.only(right: 4.0),
-      child: Material(
-        color: isActive 
-            ? AppColors.primary 
-            : (isDark ? AppColors.neutral800 : AppColors.neutral200),
-        borderRadius: BorderRadius.circular(6),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(6),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            constraints: const BoxConstraints(minWidth: 36),
-            alignment: Alignment.center,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: isActive 
-                    ? Colors.white 
-                    : (isDark ? AppColors.neutral100 : AppColors.neutral900),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   Widget _buildDeviceSelector() {
@@ -310,11 +354,7 @@ class _MainScreenState extends State<MainScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 16.0),
                         child: Row(
                           children: [
-                            const Icon(
-                              Icons.usb_rounded, 
-                              size: 18, 
-                              color: AppColors.primary
-                            ),
+                            const Icon(Icons.usb_rounded, size: 18, color: AppColors.primary),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
@@ -333,9 +373,7 @@ class _MainScreenState extends State<MainScreen> {
                   }).toList(),
                   onChanged: (device) {
                     if (device != null) {
-                      setState(() {
-                        _selectedDevice = device;
-                      });
+                      setState(() => _selectedDevice = device);
                       _connectDevice(device);
                     }
                   },
@@ -348,7 +386,7 @@ class _MainScreenState extends State<MainScreen> {
             height: 52,
             width: 52,
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
+              color: AppColors.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: IconButton(
@@ -374,14 +412,14 @@ class _MainScreenState extends State<MainScreen> {
             padding: const EdgeInsets.all(12.0),
             width: double.infinity,
             decoration: BoxDecoration(
-              color: const Color(0xFF0F121A), // Pure terminal dark
+              color: const Color(0xFF0F121A),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: isDark ? AppColors.neutral800 : AppColors.neutral200,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(isDark ? 0.3 : 0.05),
+                  color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),
@@ -389,14 +427,14 @@ class _MainScreenState extends State<MainScreen> {
             ),
             child: ListView.builder(
               controller: _scrollController,
-              itemCount: _terminal.lines.length,
+              itemCount: _terminalLines.length,
               itemBuilder: (context, index) {
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 1.0),
-                  child: Text(
-                    _terminal.lines[index],
+                  padding: const EdgeInsets.symmetric(vertical: 2.0),
+                  child: SelectableText(
+                    _terminalLines[index],
                     style: const TextStyle(
-                      color: Color(0xFF10B981), // Emerald green
+                      color: Color(0xFF10B981),
                       fontFamily: 'monospace',
                       fontSize: 13,
                       height: 1.4,
@@ -407,74 +445,74 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
         ),
-        // Extra Keys Row (Termux Style)
         if (_isShellReady)
-          Container(
-            height: 40,
-            margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: ListView(
-              scrollDirection: Axis.horizontal,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Row(
               children: [
-                _buildExtraKey('ESC', () => _adbClient.writeShellCommand('\x1B', addNewline: false)),
-                _buildExtraKey('TAB', () => _adbClient.writeShellCommand('\t', addNewline: false)),
-                _buildExtraKey('CTRL', () => setState(() => _isCtrlActive = !_isCtrlActive), isActive: _isCtrlActive),
-                _buildExtraKey('ALT', () => setState(() => _isAltActive = !_isAltActive), isActive: _isAltActive),
-                _buildExtraKey('-', () => _insertChar('-')),
-                _buildExtraKey('/', () => _insertChar('/')),
-                _buildExtraKey('|', () => _insertChar('|')),
-                _buildExtraKey('UP', _historyUp),
-                _buildExtraKey('DOWN', _historyDown),
-                _buildExtraKey('<', () => _moveCursor(-1)),
-                _buildExtraKey('>', () => _moveCursor(1)),
-              ],
-            ),
-          ),
-        // Terminal Input Field
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _commandController,
-                  enabled: _isShellReady,
-                  onChanged: _onTextChanged,
-                  onSubmitted: (_) => _submitCommand(),
-                  style: const TextStyle(fontFamily: 'monospace'),
-                  decoration: InputDecoration(
-                    hintText: _isShellReady ? '> Type command (e.g. adb shell ls)' : 'Waiting for connection...',
-                    hintStyle: TextStyle(
-                      color: isDark ? AppColors.neutral500 : AppColors.neutral400,
-                      fontFamily: 'sans-serif',
-                    ),
-                    filled: true,
-                    fillColor: isDark ? AppColors.neutral900 : AppColors.neutral100,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
+                Expanded(
+                  child: TextField(
+                    controller: _commandController,
+                    focusNode: _inputFocusNode,
+                    enabled: _isShellReady,
+                    onSubmitted: (_) => _submitCommand(),
+                    keyboardType: TextInputType.multiline,
+                    minLines: 1,
+                    maxLines: 5,
+                    style: const TextStyle(fontFamily: 'monospace'),
+                    decoration: InputDecoration(
+                      hintText: '> Type command (e.g. ls, dumpsys)',
+                      hintStyle: TextStyle(
+                        color: isDark ? AppColors.neutral500 : AppColors.neutral400,
+                        fontFamily: 'sans-serif',
+                      ),
+                      filled: true,
+                      fillColor: isDark ? AppColors.neutral900 : AppColors.neutral100,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              // Send Button
-              Container(
-                height: 52,
-                width: 52,
-                decoration: BoxDecoration(
-                  color: _isShellReady ? AppColors.primary : AppColors.neutral400.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(12),
+                const SizedBox(width: 8),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    InkWell(
+                      onTap: _isShellReady ? _historyUp : null,
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        child: Icon(Icons.keyboard_arrow_up, size: 20),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: _isShellReady ? _historyDown : null,
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        child: Icon(Icons.keyboard_arrow_down, size: 20),
+                      ),
+                    ),
+                  ],
                 ),
-                child: IconButton(
-                  onPressed: _isShellReady ? _submitCommand : null,
-                  icon: const Icon(Icons.send_rounded),
-                  color: Colors.white,
+                const SizedBox(width: 8),
+                Container(
+                  height: 52,
+                  width: 52,
+                  decoration: BoxDecoration(
+                    color: _isShellReady ? AppColors.primary : AppColors.neutral400.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    onPressed: _isShellReady ? _submitCommand : null,
+                    icon: const Icon(Icons.send_rounded),
+                    color: Colors.white,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
       ],
     );
   }
@@ -503,17 +541,13 @@ class _MainScreenState extends State<MainScreen> {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () {
-            setState(() {
-              _selectedIndex = index;
-            });
-          },
+          onTap: () => setState(() => _selectedIndex = index),
           child: Container(
             width: 48,
             height: 48,
             decoration: BoxDecoration(
               color: isSelected
-                  ? AppColors.primary.withOpacity(isDark ? 0.2 : 0.15)
+                  ? AppColors.primary.withValues(alpha: isDark ? 0.2 : 0.15)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(16),
             ),
@@ -530,12 +564,45 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildBottomNav(BuildContext context, bool isKeyboardOpen) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final navBackgroundColor = isDark ? AppColors.neutral900 : AppColors.neutral50;
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final fullHeight = 72.0 + bottomPadding;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.fastOutSlowIn,
+      height: isKeyboardOpen ? 0 : fullHeight,
+      child: ClipRect(
+        child: OverflowBox(
+          minHeight: fullHeight,
+          maxHeight: fullHeight,
+          alignment: Alignment.topCenter,
+          child: Container(
+            color: navBackgroundColor,
+            padding: EdgeInsets.only(bottom: bottomPadding),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildNavItem(context, icon: _selectedIndex == 0 ? Icons.terminal : Icons.terminal_outlined, index: 0),
+                _buildNavItem(context, icon: _selectedIndex == 1 ? Icons.bookmark : Icons.bookmark_border, index: 1),
+                _buildNavItem(context, icon: _selectedIndex == 2 ? Icons.grid_view_rounded : Icons.grid_view, index: 2),
+                _buildNavItem(context, icon: _selectedIndex == 3 ? Icons.info : Icons.info_outline, index: 3),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isKeyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 50;
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: const Text('AdShell', style: TextStyle(fontWeight: FontWeight.bold)),
       ),
@@ -545,20 +612,7 @@ class _MainScreenState extends State<MainScreen> {
           Expanded(child: _buildCurrentPage()),
         ],
       ),
-      bottomNavigationBar: Container(
-        height: 72 + MediaQuery.of(context).padding.bottom,
-        color: navBackgroundColor,
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildNavItem(context, icon: _selectedIndex == 0 ? Icons.terminal : Icons.terminal_outlined, index: 0),
-            _buildNavItem(context, icon: _selectedIndex == 1 ? Icons.bookmark : Icons.bookmark_border, index: 1),
-            _buildNavItem(context, icon: _selectedIndex == 2 ? Icons.grid_view_rounded : Icons.grid_view, index: 2),
-            _buildNavItem(context, icon: _selectedIndex == 3 ? Icons.info : Icons.info_outline, index: 3),
-          ],
-        ),
-      ),
+      bottomNavigationBar: _buildBottomNav(context, isKeyboardOpen),
     );
   }
 }

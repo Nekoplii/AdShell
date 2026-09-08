@@ -96,13 +96,25 @@ class MainActivity: FlutterActivity() {
                         try {
                             val deviceList = usbManager.deviceList
                             Log.d("AdShell", "USB device count: ${deviceList.size}")
-                            val devices = deviceList.values.map {
+                            val devices = deviceList.values.mapNotNull {
+                                var protocolType = 0 // 0=Unknown, 1=ADB, 3=Fastboot
+                                for (i in 0 until it.interfaceCount) {
+                                    val intf = it.getInterface(i)
+                                    if (intf.interfaceClass == 255 && intf.interfaceSubclass == 66) {
+                                        if (intf.interfaceProtocol == 1) protocolType = 1
+                                        if (intf.interfaceProtocol == 3) protocolType = 3
+                                    }
+                                }
+                                
+                                if (protocolType == 0) return@mapNotNull null // Ignore non-ADB/Fastboot devices
+
                                 mapOf(
                                     "deviceName" to it.deviceName,
                                     "vendorId" to it.vendorId,
                                     "productId" to it.productId,
                                     "manufacturerName" to (it.manufacturerName ?: "Unknown"),
-                                    "productName" to (it.productName ?: "Device ${it.deviceId}")
+                                    "productName" to (it.productName ?: "Device ${it.deviceId}"),
+                                    "protocol" to protocolType
                                 )
                             }
                             mainHandler.post { result.success(devices) }
@@ -155,11 +167,14 @@ class MainActivity: FlutterActivity() {
                             var targetInterface: UsbInterface? = null
                             var epIn: UsbEndpoint? = null
                             var epOut: UsbEndpoint? = null
+                            var detectedProtocol = 0
 
                             for (i in 0 until device.interfaceCount) {
                                 val intf = device.getInterface(i)
-                                if (intf.interfaceClass == 255 && intf.interfaceSubclass == 66 && intf.interfaceProtocol == 1) {
+                                if (intf.interfaceClass == 255 && intf.interfaceSubclass == 66 && 
+                                    (intf.interfaceProtocol == 1 || intf.interfaceProtocol == 3)) {
                                     targetInterface = intf
+                                    detectedProtocol = intf.interfaceProtocol
                                     for (j in 0 until intf.endpointCount) {
                                         val ep = intf.getEndpoint(j)
                                         if (ep.direction == UsbConstants.USB_DIR_IN) epIn = ep
@@ -176,17 +191,17 @@ class MainActivity: FlutterActivity() {
                                     usbInterface = targetInterface
                                     endpointIn = epIn
                                     endpointOut = epOut
-                                    mainHandler.post { result.success(true) }
+                                    mainHandler.post { result.success(detectedProtocol) }
                                 } else {
                                     conn?.close()
-                                    mainHandler.post { result.error("CLAIM_FAILED", "Failed to claim ADB interface", null) }
+                                    mainHandler.post { result.error("CLAIM_FAILED", "Failed to claim interface", null) }
                                 }
                             } else {
                                 val interfaceInfo = (0 until device.interfaceCount).joinToString(", ") { i ->
                                     val intf = device.getInterface(i)
                                     "IF${i}[cls=${intf.interfaceClass},sub=${intf.interfaceSubclass},prot=${intf.interfaceProtocol}]"
                                 }
-                                mainHandler.post { result.error("NO_ADB", "ADB interface not found. Interfaces: $interfaceInfo", null) }
+                                mainHandler.post { result.error("NO_ADB", "ADB/Fastboot interface not found. Interfaces: $interfaceInfo", null) }
                             }
                         } catch (e: Exception) {
                             mainHandler.post { result.error("CONNECT_ERROR", e.message ?: "Unknown error", null) }

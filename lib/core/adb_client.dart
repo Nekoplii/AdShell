@@ -27,17 +27,19 @@ class AdbClient {
   String? _connectedDevice;
   bool _authSigned = false;
   
-  // Interactive Shell Stream IDs
-  final int _localId = 1; // Our stream ID
-  int? _remoteId; // Target's stream ID
+  int _nextLocalId = 1;
+  final Map<int, String> _activeStreams = {};
 
   final StreamController<String> _shellOutput = StreamController<String>.broadcast();
   Stream<String> get shellOutput => _shellOutput.stream;
 
+  final StreamController<bool> _shellState = StreamController<bool>.broadcast();
+  Stream<bool> get shellState => _shellState.stream;
+
   Future<bool> connect(String deviceName) async {
-    final success = await UsbManager.connect(deviceName);
-    if (!success) {
-      _shellOutput.add('Error: Failed to claim ADB interface.');
+    final protocol = await UsbManager.connect(deviceName);
+    if (protocol != 1) { // 1 = ADB
+      _shellOutput.add('Error: Failed to claim ADB interface.\n');
       return false;
     }
 
@@ -65,26 +67,28 @@ class AdbClient {
     UsbManager.disconnect();
     _connectedDevice = null;
     _authSigned = false;
-    _remoteId = null;
+    _activeStreams.clear();
+    _shellState.add(false);
     _shellOutput.add('Disconnected.\n');
   }
 
-  void writeShellCommand(String command, {bool addNewline = true}) {
-    if (_remoteId == null) {
-      _shellOutput.add('Error: Shell stream not open.\n');
-      return;
-    }
+  void executeCommand(String command) {
+    if (_connectedDevice == null) return;
     
-    final payloadString = addNewline ? '$command\n' : command;
-    final payload = Uint8List.fromList(utf8.encode(payloadString));
-    
-    final packet = AdbProtocol.createMessage(
-      AdbProtocol.A_WRTE,
-      _localId,
-      _remoteId!,
-      payload,
+    _shellOutput.add('\n\$ $command\n');
+
+    final localId = _nextLocalId++;
+    _activeStreams[localId] = command;
+
+    final openPayload = Uint8List.fromList(utf8.encode('shell:$command\x00'));
+    final openPacket = AdbProtocol.createMessage(
+      AdbProtocol.A_OPEN,
+      localId,
+      0,
+      openPayload,
     );
-    UsbManager.write(packet);
+    
+    UsbManager.write(openPacket);
   }
 
   void _startReadLoop() async {
@@ -149,24 +153,9 @@ class AdbClient {
     } else if (packet.command == AdbProtocol.A_CNXN) {
       final info = utf8.decode(packet.payload, allowMalformed: true);
       _shellOutput.add('ADB Connected! Target: $info\n');
-      _shellOutput.add('Opening interactive shell...\n');
-
-      // Open interactive shell stream
-      final openPayload = Uint8List.fromList(utf8.encode('shell:\x00'));
-      final openPacket = AdbProtocol.createMessage(
-        AdbProtocol.A_OPEN,
-        _localId,
-        0,
-        openPayload,
-      );
-      await UsbManager.write(openPacket);
-
+      _shellState.add(true);
     } else if (packet.command == AdbProtocol.A_OKAY) {
-      // If arg1 matches our local ID, the target is acknowledging our OPEN request
-      if (packet.arg1 == _localId && _remoteId == null) {
-        _remoteId = packet.arg0; // Save target's stream ID
-        _shellOutput.add('Interactive shell ready. Type commands below.\n');
-      }
+      // Stream opened successfully
     } else if (packet.command == AdbProtocol.A_WRTE) {
       final content = utf8.decode(packet.payload, allowMalformed: true);
       _shellOutput.add(content);
@@ -174,14 +163,20 @@ class AdbClient {
       // Acknowledge the write back to the remote stream
       final okay = AdbProtocol.createMessage(
         AdbProtocol.A_OKAY,
-        _localId,
+        packet.arg1,
         packet.arg0,
         Uint8List(0),
       );
       await UsbManager.write(okay);
     } else if (packet.command == AdbProtocol.A_CLSE) {
-      _shellOutput.add('Shell stream closed by remote.\n');
-      _remoteId = null;
+      _activeStreams.remove(packet.arg1);
+      final okay = AdbProtocol.createMessage(
+        AdbProtocol.A_OKAY,
+        packet.arg1,
+        packet.arg0,
+        Uint8List(0),
+      );
+      await UsbManager.write(okay);
     } else {
       _shellOutput.add('Unknown packet: 0x${packet.command.toRadixString(16)}\n');
     }

@@ -6,6 +6,7 @@ class UsbDeviceInfo {
   final int productId;
   final String? manufacturerName;
   final String? productName;
+  final int protocol; // 1 = ADB, 3 = Fastboot
 
   UsbDeviceInfo({
     required this.deviceName,
@@ -13,6 +14,7 @@ class UsbDeviceInfo {
     required this.productId,
     this.manufacturerName,
     this.productName,
+    required this.protocol,
   });
 
   factory UsbDeviceInfo.fromMap(Map<Object?, Object?> map) {
@@ -22,6 +24,7 @@ class UsbDeviceInfo {
       productId: map['productId'] as int,
       manufacturerName: map['manufacturerName'] as String?,
       productName: map['productName'] as String?,
+      protocol: map['protocol'] as int? ?? 1,
     );
   }
 }
@@ -47,11 +50,11 @@ class UsbManager {
     return granted ?? false;
   }
 
-  static Future<bool> connect(String deviceName) async {
-    final bool? success = await _channel.invokeMethod('connect', {
+  static Future<int> connect(String deviceName) async {
+    final int? protocol = await _channel.invokeMethod('connect', {
       'deviceName': deviceName,
     });
-    return success ?? false;
+    return protocol ?? 0;
   }
 
   static Future<bool> disconnect() async {
