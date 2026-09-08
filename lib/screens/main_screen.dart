@@ -4,6 +4,7 @@ import '../core/adb_client.dart';
 import '../core/fastboot_client.dart';
 import '../core/usb_manager.dart';
 import '../theme/app_theme.dart';
+import 'saved_commands_tab.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -517,12 +518,23 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  void _executeExternalCommand(String command) {
+    setState(() {
+      _commandController.text = command;
+      _selectedIndex = 0; // Switch to terminal tab
+    });
+    // Add small delay to let UI switch tabs before executing
+    Future.delayed(const Duration(milliseconds: 100), () {
+      _submitCommand();
+    });
+  }
+
   Widget _buildCurrentPage() {
     switch (_selectedIndex) {
       case 0:
         return _buildShellTab();
       case 1:
-        return const Center(child: Text('Saved Commands'));
+        return SavedCommandsTab(onExecuteCommand: _executeExternalCommand);
       case 2:
         return const Center(child: Text('App Manager'));
       case 3:

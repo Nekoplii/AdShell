@@ -24,10 +24,7 @@ class AppTheme {
         seedColor: AppColors.primary,
         primary: AppColors.primary,
         brightness: Brightness.light,
-      ).copyWith(
-        surface: AppColors.neutral50,
-        onSurface: AppColors.neutral900,
-      ),
+      ).copyWith(surface: AppColors.neutral50, onSurface: AppColors.neutral900),
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.neutral50,
         elevation: 0,
@@ -45,10 +42,7 @@ class AppTheme {
         seedColor: AppColors.primary,
         primary: AppColors.primary,
         brightness: Brightness.dark,
-      ).copyWith(
-        surface: AppColors.neutral900,
-        onSurface: AppColors.neutral50,
-      ),
+      ).copyWith(surface: AppColors.neutral900, onSurface: AppColors.neutral50),
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.neutral900,
         elevation: 0,
