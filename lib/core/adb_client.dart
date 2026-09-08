@@ -25,7 +25,11 @@ class AdbClient {
 
   bool _isRunning = false;
   String? _connectedDevice;
-  bool _authSigned = false; // Track if we already sent signature
+  bool _authSigned = false;
+  
+  // Interactive Shell Stream IDs
+  final int _localId = 1; // Our stream ID
+  int? _remoteId; // Target's stream ID
 
   final StreamController<String> _shellOutput = StreamController<String>.broadcast();
   Stream<String> get shellOutput => _shellOutput.stream;
@@ -61,7 +65,26 @@ class AdbClient {
     UsbManager.disconnect();
     _connectedDevice = null;
     _authSigned = false;
-    _shellOutput.add('Disconnected.');
+    _remoteId = null;
+    _shellOutput.add('Disconnected.\n');
+  }
+
+  void writeShellCommand(String command, {bool addNewline = true}) {
+    if (_remoteId == null) {
+      _shellOutput.add('Error: Shell stream not open.\n');
+      return;
+    }
+    
+    final payloadString = addNewline ? '$command\n' : command;
+    final payload = Uint8List.fromList(utf8.encode(payloadString));
+    
+    final packet = AdbProtocol.createMessage(
+      AdbProtocol.A_WRTE,
+      _localId,
+      _remoteId!,
+      payload,
+    );
+    UsbManager.write(packet);
   }
 
   void _startReadLoop() async {
@@ -125,24 +148,42 @@ class AdbClient {
       }
     } else if (packet.command == AdbProtocol.A_CNXN) {
       final info = utf8.decode(packet.payload, allowMalformed: true);
-      _shellOutput.add('ADB Connected! Target: $info');
+      _shellOutput.add('ADB Connected! Target: $info\n');
+      _shellOutput.add('Opening interactive shell...\n');
+
+      // Open interactive shell stream
+      final openPayload = Uint8List.fromList(utf8.encode('shell:\x00'));
+      final openPacket = AdbProtocol.createMessage(
+        AdbProtocol.A_OPEN,
+        _localId,
+        0,
+        openPayload,
+      );
+      await UsbManager.write(openPacket);
+
+    } else if (packet.command == AdbProtocol.A_OKAY) {
+      // If arg1 matches our local ID, the target is acknowledging our OPEN request
+      if (packet.arg1 == _localId && _remoteId == null) {
+        _remoteId = packet.arg0; // Save target's stream ID
+        _shellOutput.add('Interactive shell ready. Type commands below.\n');
+      }
     } else if (packet.command == AdbProtocol.A_WRTE) {
       final content = utf8.decode(packet.payload, allowMalformed: true);
       _shellOutput.add(content);
 
+      // Acknowledge the write back to the remote stream
       final okay = AdbProtocol.createMessage(
         AdbProtocol.A_OKAY,
-        packet.arg1,
+        _localId,
         packet.arg0,
         Uint8List(0),
       );
-      UsbManager.write(okay);
+      await UsbManager.write(okay);
     } else if (packet.command == AdbProtocol.A_CLSE) {
-      _shellOutput.add('Connection closed by remote.');
-    } else if (packet.command == AdbProtocol.A_OKAY) {
-      // Acknowledgement received, do nothing
+      _shellOutput.add('Shell stream closed by remote.\n');
+      _remoteId = null;
     } else {
-      _shellOutput.add('Unknown packet: 0x${packet.command.toRadixString(16)}');
+      _shellOutput.add('Unknown packet: 0x${packet.command.toRadixString(16)}\n');
     }
   }
 }
