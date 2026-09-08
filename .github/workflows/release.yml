@@ -40,9 +40,18 @@ jobs:
           VERSION_NAME=${TAG_NAME#v}
           echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_OUTPUT
 
+      - name: Decode Keystore
+        run: |
+          # Windows certutil outputs with headers and line breaks, decode it cleanly
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | grep -v "CERTIFICATE" | base64 -d > android/app/release.jks
+
       - name: Build APK
         # Inject the tag as the version name and the GitHub run number as the version code
         run: flutter build apk --release --build-name=${{ steps.extract_version.outputs.VERSION_NAME }} --build-number=${{ github.run_number }}
+        env:
+          KEYSTORE_FILE: "release.jks"
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Rename APK
         run: mv build/app/outputs/flutter-apk/app-release.apk adshell-${{ github.ref_name }}.apk
