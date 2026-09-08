@@ -6,6 +6,7 @@ import '../core/usb_manager.dart';
 import '../theme/app_theme.dart';
 import 'saved_commands_tab.dart';
 import 'device_info_tab.dart';
+import 'apps_tab.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -535,9 +536,17 @@ class _MainScreenState extends State<MainScreen> {
       case 0:
         return _buildShellTab();
       case 1:
-        return SavedCommandsTab(onExecuteCommand: _executeExternalCommand);
+        return SavedCommandsTab(
+          isConnected: _isShellReady,
+          onExecuteCommand: _executeExternalCommand,
+        );
       case 2:
-        return const Center(child: Text('App Manager'));
+        return AppsTab(
+          isAdbConnected: _isShellReady && _activeProtocol == 1,
+          isFastbootConnected: _isShellReady && _activeProtocol == 3,
+          adbClient: _adbClient,
+          fastbootClient: _fastbootClient,
+        );
       case 3:
         return DeviceInfoTab(isConnected: _isShellReady);
       default:
@@ -545,31 +554,34 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  Widget _buildNavItem(BuildContext context, {required IconData icon, required int index}) {
+  Widget _buildNavItem(BuildContext context, {required IconData icon, required int index, String? tooltip}) {
     final isSelected = _selectedIndex == index;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Center(
       child: Material(
         color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => setState(() => _selectedIndex = index),
-          child: Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? AppColors.primary.withValues(alpha: isDark ? 0.2 : 0.15)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(
-              icon,
-              color: isSelected
-                  ? AppColors.primary
-                  : (isDark ? AppColors.neutral400 : AppColors.neutral500),
-              size: 26,
+        child: Tooltip(
+          message: tooltip ?? '',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => setState(() => _selectedIndex = index),
+            child: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? AppColors.primary.withValues(alpha: isDark ? 0.2 : 0.15)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(
+                icon,
+                color: isSelected
+                    ? AppColors.primary
+                    : (isDark ? AppColors.neutral400 : AppColors.neutral500),
+                size: 26,
+              ),
             ),
           ),
         ),
@@ -598,10 +610,10 @@ class _MainScreenState extends State<MainScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildNavItem(context, icon: _selectedIndex == 0 ? Icons.terminal : Icons.terminal_outlined, index: 0),
-                _buildNavItem(context, icon: _selectedIndex == 1 ? Icons.bookmark : Icons.bookmark_border, index: 1),
-                _buildNavItem(context, icon: _selectedIndex == 2 ? Icons.grid_view_rounded : Icons.grid_view, index: 2),
-                _buildNavItem(context, icon: _selectedIndex == 3 ? Icons.info : Icons.info_outline, index: 3),
+                _buildNavItem(context, icon: _selectedIndex == 0 ? Icons.terminal : Icons.terminal_outlined, index: 0, tooltip: 'Terminal'),
+                _buildNavItem(context, icon: _selectedIndex == 1 ? Icons.bookmark : Icons.bookmark_border, index: 1, tooltip: 'Saved'),
+                _buildNavItem(context, icon: _selectedIndex == 2 ? Icons.grid_view_rounded : Icons.grid_view, index: 2, tooltip: 'Apps'),
+                _buildNavItem(context, icon: _selectedIndex == 3 ? Icons.info : Icons.info_outline, index: 3, tooltip: 'Info'),
               ],
             ),
           ),
