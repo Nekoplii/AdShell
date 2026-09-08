@@ -42,8 +42,8 @@ jobs:
 
       - name: Decode Keystore
         run: |
-          # Windows certutil outputs with headers and line breaks, decode it cleanly
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | grep -v "CERTIFICATE" | base64 -d > android/app/release.jks
+          # Strip headers, whitespace, and newlines before decoding to prevent JKS corruption
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | grep -v "CERTIFICATE" | tr -d '\n\r ' | base64 -d > android/app/release.jks
 
       - name: Build APK
         # Inject the tag as the version name and the GitHub run number as the version code
