@@ -32,8 +32,17 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
+      - name: Extract Version Name
+        id: extract_version
+        run: |
+          # Remove the 'v' prefix from the tag (e.g., v1.0.0 -> 1.0.0)
+          TAG_NAME=${{ github.ref_name }}
+          VERSION_NAME=${TAG_NAME#v}
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_OUTPUT
+
       - name: Build APK
-        run: flutter build apk --release
+        # Inject the tag as the version name and the GitHub run number as the version code
+        run: flutter build apk --release --build-name=${{ steps.extract_version.outputs.VERSION_NAME }} --build-number=${{ github.run_number }}
 
       - name: Rename APK
         run: mv build/app/outputs/flutter-apk/app-release.apk adshell-${{ github.ref_name }}.apk
