@@ -21,9 +21,10 @@ class SavedCommand {
 }
 
 class SavedCommandsTab extends StatefulWidget {
+  final bool isConnected;
   final Function(String) onExecuteCommand;
 
-  const SavedCommandsTab({super.key, required this.onExecuteCommand});
+  const SavedCommandsTab({super.key, required this.isConnected, required this.onExecuteCommand});
 
   @override
   State<SavedCommandsTab> createState() => _SavedCommandsTabState();
@@ -150,7 +151,7 @@ class _SavedCommandsTabState extends State<SavedCommandsTab> {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: _commands.isEmpty
+      body: _commands.isEmpty && widget.isConnected
           ? Center(
               child: Text(
                 'No saved commands.',
@@ -159,8 +160,39 @@ class _SavedCommandsTabState extends State<SavedCommandsTab> {
             )
           : ListView.builder(
               padding: const EdgeInsets.only(top: 8, bottom: 80),
-              itemCount: _commands.length,
+              itemCount: _commands.length + (widget.isConnected ? 0 : 1), // Add 1 for the banner if disconnected
               itemBuilder: (context, index) {
+                // If disconnected, render the banner at index 0
+                if (!widget.isConnected) {
+                  if (index == 0) {
+                    return Container(
+                      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Connect a device to execute commands.',
+                              style: TextStyle(color: isDark ? Colors.redAccent[100] : Colors.red[900]),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                  // Shift the index by 1 to render the actual commands
+                  index -= 1;
+                }
+
+                if (index < 0 || index >= _commands.length) return const SizedBox.shrink();
+                
                 final cmd = _commands[index];
                 return Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -175,7 +207,12 @@ class _SavedCommandsTabState extends State<SavedCommandsTab> {
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     title: Text(
                       cmd.title,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: widget.isConnected 
+                            ? (isDark ? AppColors.neutral50 : AppColors.neutral900)
+                            : AppColors.neutral500,
+                      ),
                     ),
                     subtitle: Padding(
                       padding: const EdgeInsets.only(top: 6),
@@ -183,7 +220,9 @@ class _SavedCommandsTabState extends State<SavedCommandsTab> {
                         cmd.command,
                         style: TextStyle(
                           fontFamily: 'monospace',
-                          color: isDark ? AppColors.primary : AppColors.primary.withValues(alpha: 0.8),
+                          color: widget.isConnected 
+                              ? (isDark ? AppColors.primary : AppColors.primary.withValues(alpha: 0.8))
+                              : AppColors.neutral500,
                         ),
                       ),
                     ),
@@ -191,7 +230,7 @@ class _SavedCommandsTabState extends State<SavedCommandsTab> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          icon: const Icon(Icons.edit_outlined, size: 20),
+                          icon: Icon(Icons.edit_outlined, size: 20, color: isDark ? AppColors.neutral400 : AppColors.neutral600),
                           onPressed: () => _showCommandDialog(commandToEdit: cmd, index: index),
                         ),
                         IconButton(
@@ -200,9 +239,10 @@ class _SavedCommandsTabState extends State<SavedCommandsTab> {
                         ),
                       ],
                     ),
-                    onTap: () {
+                    enabled: widget.isConnected,
+                    onTap: widget.isConnected ? () {
                       widget.onExecuteCommand(cmd.command);
-                    },
+                    } : null,
                   ),
                 );
               },
