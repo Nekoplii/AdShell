@@ -5,6 +5,7 @@ import '../core/fastboot_client.dart';
 import '../core/usb_manager.dart';
 import '../theme/app_theme.dart';
 import 'saved_commands_tab.dart';
+import 'device_info_tab.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -538,7 +539,7 @@ class _MainScreenState extends State<MainScreen> {
       case 2:
         return const Center(child: Text('App Manager'));
       case 3:
-        return const Center(child: Text('Device Info'));
+        return DeviceInfoTab(isConnected: _isShellReady);
       default:
         return const Center(child: Text('Unknown'));
     }

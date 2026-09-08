@@ -29,6 +29,10 @@ class AdbClient {
   
   int _nextLocalId = 1;
   final Map<int, String> _activeStreams = {};
+  
+  // Maps for Future-based command execution
+  final Map<int, Completer<String>> _pendingCommands = {};
+  final Map<int, StringBuffer> _commandBuffers = {};
 
   final StreamController<String> _shellOutput = StreamController<String>.broadcast();
   Stream<String> get shellOutput => _shellOutput.stream;
@@ -89,6 +93,27 @@ class AdbClient {
     );
     
     UsbManager.write(openPacket);
+  }
+
+  /// Executes a command and returns the output as a Future string without printing to terminal.
+  Future<String> executeCommandWithResult(String command) async {
+    if (_connectedDevice == null) return 'Error: Not connected';
+
+    final localId = _nextLocalId++;
+    final completer = Completer<String>();
+    _pendingCommands[localId] = completer;
+    _commandBuffers[localId] = StringBuffer();
+
+    final openPayload = Uint8List.fromList(utf8.encode('shell:$command\x00'));
+    final openPacket = AdbProtocol.createMessage(
+      AdbProtocol.A_OPEN,
+      localId,
+      0,
+      openPayload,
+    );
+    
+    UsbManager.write(openPacket);
+    return completer.future;
   }
 
   void _startReadLoop() async {
@@ -158,7 +183,12 @@ class AdbClient {
       // Stream opened successfully
     } else if (packet.command == AdbProtocol.A_WRTE) {
       final content = utf8.decode(packet.payload, allowMalformed: true);
-      _shellOutput.add(content);
+      
+      if (_pendingCommands.containsKey(packet.arg1)) {
+        _commandBuffers[packet.arg1]?.write(content);
+      } else {
+        _shellOutput.add(content);
+      }
 
       // Acknowledge the write back to the remote stream
       final okay = AdbProtocol.createMessage(
@@ -169,7 +199,14 @@ class AdbClient {
       );
       await UsbManager.write(okay);
     } else if (packet.command == AdbProtocol.A_CLSE) {
-      _activeStreams.remove(packet.arg1);
+      if (_pendingCommands.containsKey(packet.arg1)) {
+        _pendingCommands[packet.arg1]?.complete(_commandBuffers[packet.arg1]?.toString() ?? '');
+        _pendingCommands.remove(packet.arg1);
+        _commandBuffers.remove(packet.arg1);
+      } else {
+        _activeStreams.remove(packet.arg1);
+      }
+      
       final okay = AdbProtocol.createMessage(
         AdbProtocol.A_OKAY,
         packet.arg1,
